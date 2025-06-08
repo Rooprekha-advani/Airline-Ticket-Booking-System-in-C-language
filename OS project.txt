@@ -1,0 +1,285 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+#include <semaphore.h>
+
+#define MAX_SEATS 5
+
+struct book {
+    char code[20];
+    char name[20];
+    char date[20];
+    int cost;
+};
+
+int available_seats = MAX_SEATS;
+pthread_mutex_t seat_mutex;
+sem_t seat_sem;
+
+void ta_det();
+void viewall();
+void find();
+void* book_ticket_thread(void* arg);
+void book_tic(int total_seat);
+void old_rec();
+void delete_ticket();
+
+int main() {
+    int ch;
+    pthread_mutex_init(&seat_mutex, NULL);
+    sem_init(&seat_sem, 0, MAX_SEATS);
+
+    do {
+        printf("\n==================================");
+        printf("\n  Airline Ticket Booking System");
+        printf("\n==================================");
+        printf("\n 1. Add New Flight Ticket ");
+        printf("\n 2. View All Tickets");
+        printf("\n 3. Find Ticket");
+        printf("\n 4. Book Ticket");
+        printf("\n 5. Delete Flight Ticket");
+        printf("\n 6. Old Records");
+        printf("\n 0. Exit");
+        printf("\nEnter your choice: ");
+        scanf("%d", &ch);
+
+        switch (ch) {
+            case 1:
+                ta_det();
+                break;
+            case 2:
+                viewall();
+                break;
+            case 3:
+                find();
+                break;
+            case 4: {
+                pthread_t tid;
+                pthread_create(&tid, NULL, book_ticket_thread, NULL);
+                pthread_join(tid, NULL);
+                break;
+            }
+            case 5:
+                delete_ticket();
+                break;
+            case 6:
+                old_rec();
+                break;
+            case 0:
+                break;
+            default:
+                printf("Wrong choice!\n");
+        }
+    } while (ch != 0);
+
+    pthread_mutex_destroy(&seat_mutex);
+    sem_destroy(&seat_sem);
+    return 0;
+}
+
+void ta_det() {
+    FILE *fp;
+    struct book b;
+    printf("Enter ticket code: ");
+    scanf("%s", b.code);
+    printf("Enter Flight name: ");
+    scanf("%s", b.name);
+    printf("Enter date: ");
+    scanf("%s", b.date);
+    printf("Enter ticket price: ");
+    scanf("%d", &b.cost);
+
+    fp = fopen("data.txt", "a");
+    if (fp == NULL) {
+        printf("File not found!\n");
+    } else {
+        fprintf(fp, "%s %s %s %d\n", b.code, b.name, b.date, b.cost);
+        printf("Ticket added successfully!\n");
+        fclose(fp);
+    }
+}
+
+void viewall() {
+    char ch;
+    FILE *fp = fopen("data.txt", "r");
+    if (fp == NULL) {
+        printf("File not found!\n");
+        return;
+    }
+    printf("\nAll Ticket Records:\n");
+    while ((ch = fgetc(fp)) != EOF)
+        putchar(ch);
+    fclose(fp);
+}
+
+void find() {
+    struct book b;
+    FILE *fp;
+    char code[20];
+    int found = 0;
+
+    printf("Enter ticket code: ");
+    scanf("%s", code);
+
+    fp = fopen("data.txt", "r");
+    if (fp == NULL) {
+        printf("File not found!\n");
+        return;
+    }
+
+    while (fscanf(fp, "%s %s %s %d", b.code, b.name, b.date, &b.cost) == 4) {
+        if (strcmp(b.code, code) == 0) {
+            printf("\nRecord Found:\n");
+            printf("Code: %s\n", b.code);
+            printf("Flight Name: %s\n", b.name);
+            printf("Date: %s\n", b.date);
+            printf("Cost: %d\n", b.cost);
+            found = 1;
+            break;
+        }
+    }
+    if (!found)
+        printf("Ticket with code '%s' not found.\n", code);
+
+    fclose(fp);
+}
+
+void* book_ticket_thread(void* arg) {
+    int seats_to_book;
+
+    printf("\nHow many seats do you want to book? ");
+    scanf("%d", &seats_to_book);
+
+    pthread_mutex_lock(&seat_mutex);
+    if (seats_to_book > available_seats) {
+        printf("❌ Not enough seats available! Only %d left.\n", available_seats);
+        pthread_mutex_unlock(&seat_mutex);
+        return NULL;
+    }
+
+    for (int i = 0; i < seats_to_book; i++) {
+        if (sem_trywait(&seat_sem) != 0) {
+            for (int j = 0; j < i; j++) {
+                sem_post(&seat_sem);
+            }
+            printf("❌ Could not reserve all requested seats. Try fewer.\n");
+            pthread_mutex_unlock(&seat_mutex);
+            return NULL;
+        }
+    }
+
+    available_seats -= seats_to_book;
+    pthread_mutex_unlock(&seat_mutex);
+
+    book_tic(seats_to_book);
+
+    printf("✅ Booking confirmed. Seats left: %d\n", available_seats);
+    return NULL;
+}
+
+void book_tic(int total_seat) {
+    struct book b;
+    FILE *fp;
+    char code[20];
+    char name[20];
+    int phone;
+
+    viewall();
+    printf("\nEnter ticket code to book: ");
+    scanf("%s", code);
+
+    fp = fopen("data.txt", "r");
+    if (fp == NULL) {
+        printf("File not found!\n");
+        return;
+    }
+
+    int found = 0;
+    while (fscanf(fp, "%s %s %s %d", b.code, b.name, b.date, &b.cost) == 4) {
+        if (strcmp(b.code, code) == 0) {
+            found = 1;
+            break;
+        }
+    }
+    fclose(fp);
+
+    if (!found) {
+        printf("Ticket code not found!\n");
+        return;
+    }
+
+    printf("\nPassenger name: ");
+    scanf("%s", name);
+    printf("Phone number: ");
+    scanf("%d", &phone);
+
+    printf("\nBooking Summary:\n");
+    printf("Name: %s\n", name);
+    printf("Phone Number: %d\n", phone);
+    printf("Total Seats: %d\n", total_seat);
+
+    FILE *book_fp = fopen("booking.txt", "a");
+    if (book_fp != NULL) {
+        fprintf(book_fp, "%s %s %d %d\n", code, name, phone, total_seat);
+        fclose(book_fp);
+    }
+}
+
+void delete_ticket() {
+    char code[20];
+    struct book b;
+    int found = 0;
+
+    printf("Enter ticket code to delete: ");
+    scanf("%s", code);
+
+    FILE *fp = fopen("data.txt", "r");
+    FILE *temp = fopen("temp.txt", "w");
+
+    if (fp == NULL || temp == NULL) {
+        printf("File error!\n");
+        return;
+    }
+
+    while (fscanf(fp, "%s %s %s %d", b.code, b.name, b.date, &b.cost) == 4) {
+        if (strcmp(b.code, code) != 0) {
+            fprintf(temp, "%s %s %s %d\n", b.code, b.name, b.date, b.cost);
+        } else {
+            found = 1;
+        }
+    }
+
+    fclose(fp);
+    fclose(temp);
+
+    remove("data.txt");
+    rename("temp.txt", "data.txt");
+
+    if (found) {
+        printf("✅ Ticket with code '%s' deleted successfully.\n", code);
+    } else {
+        printf("❌ Ticket with code '%s' not found.\n", code);
+    }
+}
+
+void old_rec() {
+    FILE *fp = fopen("booking.txt", "r");
+    char code[20], name[20];
+    int phone, seats;
+
+    if (fp == NULL) {
+        printf("No booking records found!\n");
+        return;
+    }
+
+    printf("\nBooked Ticket Records:\n");
+    printf("FlightCode\tName\tPhone\tSeats\n");
+    printf("--------------------------------------\n");
+
+    while (fscanf(fp, "%s %s %d %d", code, name, &phone, &seats) == 4) {
+        printf("%s\t\t%s\t%d\t%d\n", code, name, phone, seats);
+    }
+
+    fclose(fp);
+}
